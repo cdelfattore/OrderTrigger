@@ -1,0 +1,115 @@
+/**
+* Handler class for the Order Trigger
+* chris@delfattoresoftware.com
+**/
+public class OrderTriggerHandler {
+
+    private OrderTriggerHandler() { }
+    
+    public static Integer currentYear = Date.today().year();
+    public static Integer previousYear = Date.today().year() - 1;
+    
+    /**
+    * Method to handle the deletion of an order record.
+    * This method will update the Order_Totals_Last_Year__c field and Order_Totals_This_Year__c field
+    * on the Account Id related to the Order.
+    */    
+    public static void handleBeforeDelete(List<Order> orderList){
+    
+        //Group the accounts by account Id and year by using the AccountOrderTotal inner class.
+        Map<Id, AccountOrderTotal> accountOrderTotalMap = organizeAccountOrders(orderList);
+        
+        if(!accountOrderTotalMap.isEmpty()){
+            //query for accounts that where related to the Orders that were deleted.
+            List<Account> accountList = queryAccounts(accountOrderTotalMap.keySet());
+            
+            //Subtract the order totals from the account field
+            for(Account a : accountList){
+                a.Order_Totals_Last_Year__c -= accountOrderTotalMap.get(a.Id).previousYearOrderTotal;                
+                a.Order_Totals_This_Year__c -= accountOrderTotalMap.get(a.Id).currentYearOrderTotal;
+            }
+            
+            update accountList;
+        }
+    
+    }
+    
+   /**
+    * Method to handle the undeletion of an order record.
+    * This method will update the Order_Totals_Last_Year__c field and Order_Totals_This_Year__c field
+    * on the Account Id related to the Order.
+    */
+    public static void handleAfterUnDelete(List<Order> orderList){
+        //Group the accounts by account Id and year by using the AccountOrderTotal inner class.
+        Map<Id, AccountOrderTotal> accountOrderTotalMap = organizeAccountOrders(orderList);
+        
+        if(!accountOrderTotalMap.isEmpty()){
+            //query for accounts that where related to the Orders that were deleted.
+            List<Account> accountList = queryAccounts(accountOrderTotalMap.keySet());
+            
+            //Subtract the order totals from the account field
+            for(Account a : accountList){
+                a.Order_Totals_Last_Year__c += accountOrderTotalMap.get(a.Id).previousYearOrderTotal;                
+                a.Order_Totals_This_Year__c += accountOrderTotalMap.get(a.Id).currentYearOrderTotal;
+            }
+            
+            update accountList;
+        }
+    }
+    
+    public static Map<Id, AccountOrderTotal> organizeAccountOrders(List<Order> orderList){
+        Map<Id, AccountOrderTotal> accOrdTotMap = new Map<Id, AccountOrderTotal>();
+        
+        for(Order o : orderList){
+            if(o.TotalAmount == null){
+                continue;
+            }
+            
+            if(accOrdTotMap.containsKey(o.AccountId)){
+                if(o.EffectiveDate.year() == currentYear){
+                    accOrdTotMap.get(o.AccountId).currentYearOrderTotal += o.TotalAmount;
+                }
+                else if(o.EffectiveDate.year() == previousYear){
+                    accOrdTotMap.get(o.AccountId).previousYearOrderTotal += o.TotalAmount;
+                }
+                
+            }
+            else {
+                AccountOrderTotal accOrdTot = new AccountOrderTotal(o.AccountId);
+                if(o.EffectiveDate.year() == currentYear){
+                    accOrdTot.currentYearOrderTotal += o.TotalAmount;
+                }
+                else if(o.EffectiveDate.year() == previousYear){
+                    accOrdTot.previousYearOrderTotal += o.TotalAmount;
+                }
+                
+                accOrdTotMap.put(o.AccountId, accOrdTot); 
+            }
+        }
+        
+        return accOrdTotMap;
+    }
+    
+    /**
+    * Query for the Account objects to get previous order totals
+    **/
+    public static List<Account> queryAccounts(Set<Id> accIdSet){
+        return [SELECT Id, Order_Totals_Last_Year__c, Order_Totals_This_Year__c FROM Account WHERE Id IN :accIdSet];
+        
+    }
+    
+    /**
+    * Inner class used to organize Orders for each Account.
+    **/
+    private class AccountOrderTotal {
+        public Decimal previousYearOrderTotal {get;set;}
+        public Decimal currentYearOrderTotal {get;set;}
+        public Id AccountId {get;set;}
+        
+        public AccountOrderTotal(Id accId){
+            this.AccountId = accId;
+            this.previousYearOrderTotal = 0.0;
+            this.currentYearOrderTotal = 0.0;
+        }
+    }
+}
